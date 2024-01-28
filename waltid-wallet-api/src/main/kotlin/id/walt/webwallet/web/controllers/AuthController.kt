@@ -18,9 +18,11 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import io.github.smiley4.ktorswaggerui.dsl.get
 import io.github.smiley4.ktorswaggerui.dsl.post
 import io.github.smiley4.ktorswaggerui.dsl.route
+import io.ktor.client.*
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.auth.*
+import io.ktor.server.auth.jwt.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.sessions.*
@@ -111,6 +113,40 @@ fun Application.configureSecurity() {
     }
   }
 
+  authentication {
+    oauth("keycloakOAuth") {
+        client = HttpClient()
+      providerLookup = {
+        // https://api.ktor.io/ktor-server/ktor-server-plugins/ktor-server-auth/io.ktor.server.auth/-o-auth-server-settings/index.html
+        OAuthServerSettings.OAuth2ServerSettings(
+            name = "keycloak",
+            authorizeUrl =
+                "http://0.0.0.0:8080/realms/waltid-keycloak-nuxt/protocol/openid-connect/auth",
+            accessTokenUrl =
+                "http://0.0.0.0:8080/realms/waltid-keycloak-nuxt/protocol/openid-connect/token",
+            clientId = "waltid_backend",
+            clientSecret = "5FXJ9IxtMTHWfGUDDU8LGZXaWEu3Qqnk",
+            accessTokenRequiresBasicAuth = false,
+            requestMethod = HttpMethod.Post,
+            defaultScopes = listOf("roles"))
+      }
+      urlProvider = { "http://localhost:8090/" }
+    }
+    jwt("auth-jwt") {
+      realm = ""
+      verifier(jwkProvider, issuer) {}
+      validate { jwtCredential ->
+        if (jwtCredential.payload.issuer != null) {
+          JWTPrincipal(jwtCredential.payload)
+        } else {
+          null
+        }
+      }
+      challenge { defaultScheme, realm ->
+        call.respond(HttpStatusCode.Unauthorized, "Token is not valid or has expired")
+      }
+    }
+  }
 }
 
 val securityUserTokenMapping = HashMap<String, UUID>() // Token -> UUID
