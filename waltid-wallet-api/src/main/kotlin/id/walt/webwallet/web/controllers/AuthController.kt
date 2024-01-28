@@ -1,6 +1,7 @@
 package id.walt.web.controllers
 
-//import id.walt.web.model.LoginRequestJson
+// import id.walt.web.model.LoginRequestJson
+import com.auth0.jwk.JwkProviderBuilder
 import id.walt.webwallet.db.models.AccountWalletMappings
 import id.walt.webwallet.db.models.AccountWalletPermissions
 import id.walt.webwallet.service.WalletServiceManager
@@ -35,13 +36,15 @@ import org.jetbrains.exposed.sql.transactions.transaction
 import kotlin.collections.set
 import kotlin.time.Duration.Companion.days
 
-private val log = KotlinLogging.logger { }
+private val log = KotlinLogging.logger {}
 
 @Suppress("ArrayInDataClass")
 data class ByteLoginRequest(val username: String, val password: ByteArray) {
-    constructor(loginRequest: EmailAccountRequest) : this(loginRequest.email, loginRequest.password.toByteArray())
+  constructor(
+      loginRequest: EmailAccountRequest
+  ) : this(loginRequest.email, loginRequest.password.toByteArray())
 
-    override fun toString() = "[LOGIN REQUEST FOR: $username]"
+  override fun toString() = "[LOGIN REQUEST FOR: $username]"
 }
 
 fun generateToken() = RandomUtils.randomBase64UrlString(256)
@@ -49,175 +52,185 @@ fun generateToken() = RandomUtils.randomBase64UrlString(256)
 data class LoginTokenSession(val token: String) : Principal
 
 object AuthKeys {
-    private val secureRandom = SecureRandom
+  private val secureRandom = SecureRandom
 
-    // TODO make statically configurable for HA deployments
-    val encryptionKey = secureRandom.nextBytes(16)
-    val signKey = secureRandom.nextBytes(16)
+  // TODO make statically configurable for HA deployments
+  val encryptionKey = secureRandom.nextBytes(16)
+  val signKey = secureRandom.nextBytes(16)
 }
+
+val jwkEndpointUrl =
+    URLBuilder("http://0.0.0.0:8080/realms/waltid-keycloak-nuxt/protocol/openid-connect/certs")
+        .build()
+        .toURI()
+        .toURL()
+val jwkProvider = JwkProviderBuilder(jwkEndpointUrl).build()
+val issuer = "http://0.0.0.0:8080/realms/waltid-keycloak-nuxt"
 
 fun Application.configureSecurity() {
 
-    install(Sessions) {
-        cookie<LoginTokenSession>("login") {
-            //cookie.encoding = CookieEncoding.BASE64_ENCODING
+  install(Sessions) {
+    cookie<LoginTokenSession>("login") {
+      // cookie.encoding = CookieEncoding.BASE64_ENCODING
 
-            //cookie.httpOnly = true
-            cookie.httpOnly = false // FIXME
-            // TODO cookie.secure = true
-            cookie.maxAge = 1.days
-            cookie.extensions["SameSite"] = "Strict"
-            transform(SessionTransportTransformerEncrypt(AuthKeys.encryptionKey, AuthKeys.signKey))
+      // cookie.httpOnly = true
+      cookie.httpOnly = false // FIXME
+      // TODO cookie.secure = true
+      cookie.maxAge = 1.days
+      cookie.extensions["SameSite"] = "Strict"
+      transform(SessionTransportTransformerEncrypt(AuthKeys.encryptionKey, AuthKeys.signKey))
+    }
+  }
+
+  install(Authentication) {
+    bearer("authenticated-bearer") {
+      authenticate { tokenCredential ->
+        if (securityUserTokenMapping.contains(tokenCredential.token)) {
+          UserIdPrincipal(securityUserTokenMapping[tokenCredential.token].toString())
+        } else {
+          null
         }
+      }
     }
 
-    install(Authentication) {
-
-        bearer("authenticated-bearer") {
-            authenticate { tokenCredential ->
-                if (securityUserTokenMapping.contains(tokenCredential.token)) {
-                    UserIdPrincipal(securityUserTokenMapping[tokenCredential.token].toString())
-                } else {
-                    null
-                }
-            }
+    session<LoginTokenSession>("authenticated-session") {
+      validate { session ->
+        if (securityUserTokenMapping.contains(session.token)) {
+          UserIdPrincipal(securityUserTokenMapping[session.token].toString())
+        } else {
+          sessions.clear("login")
+          null
         }
+      }
 
-        session<LoginTokenSession>("authenticated-session") {
-            validate { session ->
-                if (securityUserTokenMapping.contains(session.token)) {
-                    UserIdPrincipal(securityUserTokenMapping[session.token].toString())
-                } else {
-                    sessions.clear("login")
-                    null
-                }
-            }
-
-            challenge {
-                call.respond(
-                    HttpStatusCode.Unauthorized, JsonObject(
-                        mapOf(
-                            "message" to JsonPrimitive("Login Required")
-                        )
-                    )
-                )
-            }
-        }
+      challenge {
+        call.respond(
+            HttpStatusCode.Unauthorized,
+            JsonObject(mapOf("message" to JsonPrimitive("Login Required"))))
+      }
     }
+  }
+
 }
-
 
 val securityUserTokenMapping = HashMap<String, UUID>() // Token -> UUID
 
-
 fun Application.auth() {
-    webWalletRoute {
-        route("auth", {
-            tags = listOf("Authentication")
-        }) {
-            post("login", {
-                summary = "Login with [email + password] or [wallet address + ecosystem]"
-                request {
-                    body<EmailAccountRequest> {
-                        example("E-mail + password", buildJsonObject {
-                            put("email", JsonPrimitive("user@email.com"))
-                            put("password", JsonPrimitive("password"))
-                            put("type", JsonPrimitive("email"))
-                        }.toString())
-                        example("Wallet address + ecosystem", buildJsonObject {
-                            put("address", JsonPrimitive("0xABC"))
-                            put("ecosystem", JsonPrimitive("ecosystem"))
-                            put("type", JsonPrimitive("address"))
-                        }.toString())
-                    }
-                }
-                response {
-                    HttpStatusCode.OK to { description = "Login successful" }
-                    HttpStatusCode.Unauthorized to { description = "Login failed" }
-                    HttpStatusCode.BadRequest to { description = "Login failed" }
-                }
-            }) {
-                println("Login request")
-                val reqBody = LoginRequestJson.decodeFromString<AccountRequest>(call.receive())
-                AccountsService.authenticate("", reqBody).onSuccess { // FIX ME -> TENANT HERE
-                    securityUserTokenMapping[it.token] = it.id
-                    call.sessions.set(LoginTokenSession(it.token))
-                    call.response.status(HttpStatusCode.OK)
-                    call.respond(
-                        mapOf(
-                            "token" to it.token,
-                            "id" to it.id.toString(),
-                            "username" to it.username
-                        )
-                    )
-                }.onFailure {
-                    call.respond(HttpStatusCode.BadRequest, it.localizedMessage)
-                }
+  webWalletRoute {
+    route("auth", { tags = listOf("Authentication") }) {
+      post(
+          "login",
+          {
+            summary = "Login with [email + password] or [wallet address + ecosystem]"
+            request {
+              body<EmailAccountRequest> {
+                example(
+                    "E-mail + password",
+                    buildJsonObject {
+                          put("email", JsonPrimitive("user@email.com"))
+                          put("password", JsonPrimitive("password"))
+                          put("type", JsonPrimitive("email"))
+                        }
+                        .toString())
+                example(
+                    "Wallet address + ecosystem",
+                    buildJsonObject {
+                          put("address", JsonPrimitive("0xABC"))
+                          put("ecosystem", JsonPrimitive("ecosystem"))
+                          put("type", JsonPrimitive("address"))
+                        }
+                        .toString())
+              }
             }
-
-            post("create", {
-                summary = "Register with [email + password] or [wallet address + ecosystem]"
-                request {
-                    body<EmailAccountRequest> {
-                        example("E-mail + password", buildJsonObject {
-                            put("name", JsonPrimitive("Max Mustermann"))
-                            put("email", JsonPrimitive("user@email.com"))
-                            put("password", JsonPrimitive("password"))
-                            put("type", JsonPrimitive("email"))
-                        }.toString())
-                        example("Wallet address + ecosystem", buildJsonObject {
-                            put("address", JsonPrimitive("0xABC"))
-                            put("ecosystem", JsonPrimitive("ecosystem"))
-                            put("type", JsonPrimitive("address"))
-                        }.toString())
-                    }
-                }
-                response {
-                    HttpStatusCode.Created to { description = "Register successful" }
-                    HttpStatusCode.BadRequest to { description = "Register failed" }
-                }
-            }) {
-                val req = LoginRequestJson.decodeFromString<AccountRequest>(call.receive())
-                AccountsService.register("", req).onSuccess {
-                    println("Registration succeed.")
-                    call.response.status(HttpStatusCode.Created)
-                    call.respond("Registration succeed.")
-                }.onFailure {
-                    call.respond(HttpStatusCode.BadRequest, it.localizedMessage)
-                }
+            response {
+              HttpStatusCode.OK to { description = "Login successful" }
+              HttpStatusCode.Unauthorized to { description = "Login failed" }
+              HttpStatusCode.BadRequest to { description = "Login failed" }
             }
-
-            authenticate("authenticated-session", "authenticated-bearer") {
-                get("user-info", {
-                    summary = "Return user ID if logged in"
-                }) {
-                    call.respond(getUserId().name)
+          }) {
+            println("Login request")
+            val reqBody = LoginRequestJson.decodeFromString<AccountRequest>(call.receive())
+            AccountsService.authenticate("", reqBody)
+                .onSuccess { // FIX ME -> TENANT HERE
+                  securityUserTokenMapping[it.token] = it.id
+                  call.sessions.set(LoginTokenSession(it.token))
+                  call.response.status(HttpStatusCode.OK)
+                  call.respond(
+                      mapOf(
+                          "token" to it.token, "id" to it.id.toString(), "username" to it.username))
                 }
-                get("session", {
-                    summary = "Return session ID if logged in"
-                }) {
-                    //val token = getUserId().name
-                    val token = getUsersSessionToken() ?: throw UnauthorizedException("Invalid session")
+                .onFailure { call.respond(HttpStatusCode.BadRequest, it.localizedMessage) }
+          }
 
-                    if (securityUserTokenMapping.contains(token))
-                        call.respond(mapOf("token" to mapOf("accessToken" to token)))
-                    else throw UnauthorizedException("Invalid (outdated?) session!")
+      post(
+          "create",
+          {
+            summary = "Register with [email + password] or [wallet address + ecosystem]"
+            request {
+              body<EmailAccountRequest> {
+                example(
+                    "E-mail + password",
+                    buildJsonObject {
+                          put("name", JsonPrimitive("Max Mustermann"))
+                          put("email", JsonPrimitive("user@email.com"))
+                          put("password", JsonPrimitive("password"))
+                          put("type", JsonPrimitive("email"))
+                        }
+                        .toString())
+                example(
+                    "Wallet address + ecosystem",
+                    buildJsonObject {
+                          put("address", JsonPrimitive("0xABC"))
+                          put("ecosystem", JsonPrimitive("ecosystem"))
+                          put("type", JsonPrimitive("address"))
+                        }
+                        .toString())
+              }
+            }
+            response {
+              HttpStatusCode.Created to { description = "Register successful" }
+              HttpStatusCode.BadRequest to { description = "Register failed" }
+            }
+          }) {
+            val req = LoginRequestJson.decodeFromString<AccountRequest>(call.receive())
+            AccountsService.register("", req)
+                .onSuccess {
+                  println("Registration succeed.")
+                  call.response.status(HttpStatusCode.Created)
+                  call.respond("Registration succeed.")
                 }
-            }
+                .onFailure { call.respond(HttpStatusCode.BadRequest, it.localizedMessage) }
+          }
 
-            post("logout", {
-                summary = "Logout (delete session)"
-                response { HttpStatusCode.OK to { description = "Logged out." } }
-            }) {
-                val token = getUsersSessionToken()
-
-                securityUserTokenMapping.remove(token)
-
-                call.sessions.clear<LoginTokenSession>()
-                call.respond(HttpStatusCode.OK)
-            }
+      authenticate("authenticated-session", "authenticated-bearer") {
+        get("user-info", { summary = "Return user ID if logged in" }) {
+          call.respond(getUserId().name)
         }
+        get("session", { summary = "Return session ID if logged in" }) {
+          // val token = getUserId().name
+          val token = getUsersSessionToken() ?: throw UnauthorizedException("Invalid session")
+
+          if (securityUserTokenMapping.contains(token))
+              call.respond(mapOf("token" to mapOf("accessToken" to token)))
+          else throw UnauthorizedException("Invalid (outdated?) session!")
+        }
+      }
+
+      post(
+          "logout",
+          {
+            summary = "Logout (delete session)"
+            response { HttpStatusCode.OK to { description = "Logged out." } }
+          }) {
+            val token = getUsersSessionToken()
+
+            securityUserTokenMapping.remove(token)
+
+            call.sessions.clear<LoginTokenSession>()
+            call.respond(HttpStatusCode.OK)
+          }
     }
+  }
 }
 
 fun PipelineContext<Unit, ApplicationCall>.getUserId() =
@@ -227,12 +240,14 @@ fun PipelineContext<Unit, ApplicationCall>.getUserId() =
         ?: throw UnauthorizedException("Could not find user authorization within request.")
 
 fun PipelineContext<Unit, ApplicationCall>.getUserUUID() =
-    runCatching { UUID(getUserId().name) }.getOrElse { throw IllegalArgumentException("Invalid user id: $it") }
+    runCatching { UUID(getUserId().name) }
+        .getOrElse { throw IllegalArgumentException("Invalid user id: $it") }
 
 fun PipelineContext<Unit, ApplicationCall>.getWalletId() =
     runCatching {
-        UUID(call.parameters["wallet"] ?: throw IllegalArgumentException("No wallet ID provided"))
-    }.getOrElse { throw IllegalArgumentException("Invalid wallet ID provided") }
+          UUID(call.parameters["wallet"] ?: throw IllegalArgumentException("No wallet ID provided"))
+        }
+        .getOrElse { throw IllegalArgumentException("Invalid wallet ID provided") }
 
 fun PipelineContext<Unit, ApplicationCall>.getWalletService(walletId: UUID) =
     WalletServiceManager.getWalletService("", getUserUUID(), walletId) // FIX ME -> TENANT HERE
@@ -246,23 +261,26 @@ fun PipelineContext<Unit, ApplicationCall>.getUsersSessionToken(): String? =
 
 fun getNftService() = WalletServiceManager.getNftService()
 
-fun PipelineContext<Unit, ApplicationCall>.ensurePermissionsForWallet(required: AccountWalletPermissions): Boolean {
-    val userId = getUserUUID()
-    val walletId = getWalletId()
+fun PipelineContext<Unit, ApplicationCall>.ensurePermissionsForWallet(
+    required: AccountWalletPermissions
+): Boolean {
+  val userId = getUserUUID()
+  val walletId = getWalletId()
 
-    val permissions = transaction {
-        (AccountWalletMappings.select { (AccountWalletMappings.tenant eq "") and (AccountWalletMappings.accountId eq userId) and (AccountWalletMappings.wallet eq walletId) } // FIX ME -> TENANT HERE
-            .firstOrNull()
-            ?: throw ForbiddenException("This account does not have access to the specified wallet.")
-                )[AccountWalletMappings.permissions]
-    }
+  val permissions = transaction {
+    (AccountWalletMappings.select {
+          (AccountWalletMappings.tenant eq "") and
+              (AccountWalletMappings.accountId eq userId) and
+              (AccountWalletMappings.wallet eq walletId)
+        } // FIX ME -> TENANT HERE
+        .firstOrNull()
+        ?: throw ForbiddenException("This account does not have access to the specified wallet."))[
+        AccountWalletMappings.permissions]
+  }
 
-    if (permissions.power >= required.power) {
-        return true
-    } else {
-        throw InsufficientPermissionsException(
-            minimumRequired = required,
-            current = permissions
-        )
-    }
+  if (permissions.power >= required.power) {
+    return true
+  } else {
+    throw InsufficientPermissionsException(minimumRequired = required, current = permissions)
+  }
 }
