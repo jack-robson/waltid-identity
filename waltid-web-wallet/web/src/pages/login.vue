@@ -101,6 +101,11 @@
                                     </svg>
                                     <ArrowRightOnRectangleIcon v-else class="ml-1.5 h-5 w-5" />
                                 </button>
+
+                                <button @click="signIn('keycloak')" class="flex w-full justify-center rounded-md px-3 py-2 text-sm font-semibold mt-4 bg-blue-600  hover:bg-blue-500 text-white shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600" >
+                                  Sign in with keycloak
+                                </button>
+
                             </div>
 
                             <div class="flex items-center justify-between pb-2">
