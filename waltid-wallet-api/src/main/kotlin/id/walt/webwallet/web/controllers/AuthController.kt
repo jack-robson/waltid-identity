@@ -19,13 +19,26 @@ import io.github.smiley4.ktorswaggerui.dsl.get
 import io.github.smiley4.ktorswaggerui.dsl.post
 import io.github.smiley4.ktorswaggerui.dsl.route
 import io.ktor.client.*
+import io.ktor.client.*
+import io.ktor.client.call.*
+import io.ktor.client.engine.apache.*
+import io.ktor.client.request.*
+import io.ktor.client.statement.*
+import io.ktor.http.*
 import io.ktor.http.*
 import io.ktor.server.application.*
+import io.ktor.server.application.*
+import io.ktor.server.auth.*
 import io.ktor.server.auth.*
 import io.ktor.server.auth.jwt.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
+import io.ktor.server.response.*
+import io.ktor.server.response.*
+import io.ktor.server.routing.*
 import io.ktor.server.sessions.*
+import io.ktor.server.sessions.*
+import io.ktor.util.*
 import io.ktor.util.pipeline.*
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -42,11 +55,11 @@ private val log = KotlinLogging.logger {}
 
 @Suppress("ArrayInDataClass")
 data class ByteLoginRequest(val username: String, val password: ByteArray) {
-  constructor(
-      loginRequest: EmailAccountRequest
-  ) : this(loginRequest.email, loginRequest.password.toByteArray())
+    constructor(
+        loginRequest: EmailAccountRequest
+    ) : this(loginRequest.email, loginRequest.password.toByteArray())
 
-  override fun toString() = "[LOGIN REQUEST FOR: $username]"
+    override fun toString() = "[LOGIN REQUEST FOR: $username]"
 }
 
 fun generateToken() = RandomUtils.randomBase64UrlString(256)
@@ -54,11 +67,11 @@ fun generateToken() = RandomUtils.randomBase64UrlString(256)
 data class LoginTokenSession(val token: String) : Principal
 
 object AuthKeys {
-  private val secureRandom = SecureRandom
+    private val secureRandom = SecureRandom
 
-  // TODO make statically configurable for HA deployments
-  val encryptionKey = secureRandom.nextBytes(16)
-  val signKey = secureRandom.nextBytes(16)
+    // TODO make statically configurable for HA deployments
+    val encryptionKey = secureRandom.nextBytes(16)
+    val signKey = secureRandom.nextBytes(16)
 }
 
 val jwkEndpointUrl =
@@ -71,22 +84,24 @@ val issuer = "http://0.0.0.0:8080/realms/waltid-keycloak-nuxt"
 
 fun Application.configureSecurity() {
 
-  install(Sessions) {
-    cookie<LoginTokenSession>("login") {
-      // cookie.encoding = CookieEncoding.BASE64_ENCODING
+    install(Sessions) {
+        cookie<LoginTokenSession>("login") {
+            // cookie.encoding = CookieEncoding.BASE64_ENCODING
 
-      // cookie.httpOnly = true
-      cookie.httpOnly = false // FIXME
-      // TODO cookie.secure = true
-      cookie.maxAge = 1.days
-      cookie.extensions["SameSite"] = "Strict"
-      transform(SessionTransportTransformerEncrypt(AuthKeys.encryptionKey, AuthKeys.signKey))
+            // cookie.httpOnly = true
+            cookie.httpOnly = false // FIXME
+            // TODO cookie.secure = true
+            cookie.maxAge = 1.days
+            cookie.extensions["SameSite"] = "Strict"
+            transform(SessionTransportTransformerEncrypt(AuthKeys.encryptionKey, AuthKeys.signKey))
+        }
     }
-  }
 
   install(Authentication) {
     bearer("authenticated-bearer") {
       authenticate { tokenCredential ->
+          // add another session type for bearer tokens
+
         if (securityUserTokenMapping.contains(tokenCredential.token)) {
           UserIdPrincipal(securityUserTokenMapping[tokenCredential.token].toString())
         } else {
@@ -113,47 +128,49 @@ fun Application.configureSecurity() {
     }
   }
 
-  authentication {
-    oauth("keycloakOAuth") {
-        client = HttpClient()
-      providerLookup = {
-        // https://api.ktor.io/ktor-server/ktor-server-plugins/ktor-server-auth/io.ktor.server.auth/-o-auth-server-settings/index.html
-        OAuthServerSettings.OAuth2ServerSettings(
-            name = "keycloak",
-            authorizeUrl =
-                "http://0.0.0.0:8080/realms/waltid-keycloak-nuxt/protocol/openid-connect/auth",
-            accessTokenUrl =
-                "http://0.0.0.0:8080/realms/waltid-keycloak-nuxt/protocol/openid-connect/token",
-            clientId = "waltid_backend",
-            clientSecret = "5FXJ9IxtMTHWfGUDDU8LGZXaWEu3Qqnk",
-            accessTokenRequiresBasicAuth = false,
-            requestMethod = HttpMethod.Post,
-            defaultScopes = listOf("roles"))
-      }
-      urlProvider = { "http://localhost:8090/" }
-    }
-    jwt("auth-jwt") {
-      realm = ""
-      verifier(jwkProvider, issuer) {}
-      validate { jwtCredential ->
-        if (jwtCredential.payload.issuer != null) {
-          JWTPrincipal(jwtCredential.payload)
-        } else {
-          null
+    authentication {
+        oauth("keycloakOAuth") {
+            client = HttpClient()
+            providerLookup = {
+                // https://api.ktor.io/ktor-server/ktor-server-plugins/ktor-server-auth/io.ktor.server.auth/-o-auth-server-settings/index.html
+                OAuthServerSettings.OAuth2ServerSettings(
+                    name = "keycloak",
+                    authorizeUrl =
+                    "http://0.0.0.0:8080/realms/waltid-keycloak-nuxt/protocol/openid-connect/auth",
+                    accessTokenUrl =
+                    "http://0.0.0.0:8080/realms/waltid-keycloak-nuxt/protocol/openid-connect/token",
+                    clientId = "waltid_backend",
+                    clientSecret = "5FXJ9IxtMTHWfGUDDU8LGZXaWEu3Qqnk",
+                    accessTokenRequiresBasicAuth = false,
+                    requestMethod = HttpMethod.Post,
+                    defaultScopes = listOf("roles")
+                )
+            }
+            urlProvider = { "http://localhost:4545/" }
         }
-      }
-      challenge { defaultScheme, realm ->
-        call.respond(HttpStatusCode.Unauthorized, "Token is not valid or has expired")
-      }
+        jwt("auth-jwt") {
+            realm = ""
+            verifier(jwkProvider, issuer) {}
+            validate { jwtCredential ->
+                if (jwtCredential.payload.issuer != null) {
+                    JWTPrincipal(jwtCredential.payload)
+                } else {
+                    null
+                }
+            }
+            challenge { defaultScheme, realm ->
+                call.respond(HttpStatusCode.Unauthorized, "Token is not valid or has expired")
+            }
+        }
     }
-  }
 }
 
 val securityUserTokenMapping = HashMap<String, UUID>() // Token -> UUID
 
+@OptIn(InternalAPI::class)
 fun Application.auth() {
-  webWalletRoute {
-    route("auth", { tags = listOf("Authentication") }) {
+    webWalletRoute {
+        route("auth", { tags = listOf("Authentication") }) {
       post(
           "login",
           {
@@ -198,75 +215,110 @@ fun Application.auth() {
                 .onFailure { call.respond(HttpStatusCode.BadRequest, it.localizedMessage) }
           }
 
-      post(
-          "create",
-          {
-            summary = "Register with [email + password] or [wallet address + ecosystem]"
-            request {
-              body<EmailAccountRequest> {
-                example(
-                    "E-mail + password",
-                    buildJsonObject {
-                          put("name", JsonPrimitive("Max Mustermann"))
-                          put("email", JsonPrimitive("user@email.com"))
-                          put("password", JsonPrimitive("password"))
-                          put("type", JsonPrimitive("email"))
+
+
+            post(
+                "create",
+                {
+                    summary = "Register with [email + password] or [wallet address + ecosystem]"
+                    request {
+                        body<EmailAccountRequest> {
+                            example(
+                                "E-mail + password",
+                                buildJsonObject {
+                                    put("name", JsonPrimitive("Max Mustermann"))
+                                    put("email", JsonPrimitive("user@email.com"))
+                                    put("password", JsonPrimitive("password"))
+                                    put("type", JsonPrimitive("email"))
+                                }
+                                    .toString())
+                            example(
+                                "Wallet address + ecosystem",
+                                buildJsonObject {
+                                    put("address", JsonPrimitive("0xABC"))
+                                    put("ecosystem", JsonPrimitive("ecosystem"))
+                                    put("type", JsonPrimitive("address"))
+                                }
+                                    .toString())
                         }
-                        .toString())
-                example(
-                    "Wallet address + ecosystem",
-                    buildJsonObject {
-                          put("address", JsonPrimitive("0xABC"))
-                          put("ecosystem", JsonPrimitive("ecosystem"))
-                          put("type", JsonPrimitive("address"))
-                        }
-                        .toString())
-              }
+                    }
+                    response {
+                        HttpStatusCode.Created to { description = "Register successful" }
+                        HttpStatusCode.BadRequest to { description = "Register failed" }
+                    }
+                }) {
+                val req = LoginRequestJson.decodeFromString<AccountRequest>(call.receive())
+                AccountsService.register("", req)
+                    .onSuccess {
+                        println("Registration succeed.")
+                        call.response.status(HttpStatusCode.Created)
+                        call.respond("Registration succeed.")
+                    }
+                    .onFailure { call.respond(HttpStatusCode.BadRequest, it.localizedMessage) }
             }
-            response {
-              HttpStatusCode.Created to { description = "Register successful" }
-              HttpStatusCode.BadRequest to { description = "Register failed" }
-            }
-          }) {
-            val req = LoginRequestJson.decodeFromString<AccountRequest>(call.receive())
-            AccountsService.register("", req)
-                .onSuccess {
-                  println("Registration succeed.")
-                  call.response.status(HttpStatusCode.Created)
-                  call.respond("Registration succeed.")
+
+            authenticate("keycloakOAuth") {
+                get("/login") {
+                    // Redirects for authentication
                 }
-                .onFailure { call.respond(HttpStatusCode.BadRequest, it.localizedMessage) }
-          }
 
-      authenticate("authenticated-session", "authenticated-bearer") {
-        get("user-info", { summary = "Return user ID if logged in" }) {
-          call.respond(getUserId().name)
+                authenticate("auth-jwt") {
+                    get("user-info", { summary = "Return user ID if logged in" }) {
+                        call.respond(getUserId().name)
+                    }
+
+                    get("session", { summary = "Return session ID if logged in" }) {
+                        // val token = getUserId().name
+                        val token = getUsersSessionToken() ?: throw UnauthorizedException("Invalid session")
+
+                        if (securityUserTokenMapping.contains(token))
+                            call.respond(mapOf("token" to mapOf("accessToken" to token)))
+                        else throw UnauthorizedException("Invalid (outdated?) session!")
+                    }
+
+                    get("/r/world", { summary = "Return access token" }) {
+
+                        val principal = call.principal<JWTPrincipal>()
+                        val username = principal!!.payload.getClaim("preferred_username").asString()
+                        val expiresAt = principal.expiresAt?.time?.minus(System.currentTimeMillis())
+                        val accessToken = principal.payload.getClaim("access_token").asString()
+                        call.response.header("Authorization", accessToken)
+
+                        call.respond("Hello, $username! (expires in $expiresAt ms) $accessToken")
+
+                    }
+                }
+
+//          get("user-info", { summary = "Return user ID if logged in" }) {
+//          call.respond(getUserId().name)
+//        }
+//        get("session", { summary = "Return session ID if logged in" }) {
+//          // val token = getUserId().name
+//          val token = getUsersSessionToken() ?: throw UnauthorizedException("Invalid session")
+//
+//          if (securityUserTokenMapping.contains(token))
+//              call.respond(mapOf("token" to mapOf("accessToken" to token)))
+//          else throw UnauthorizedException("Invalid (outdated?) session!")
+//        }
+            }
+
+
+
+            post(
+                "logout",
+                {
+                    summary = "Logout (delete session)"
+                    response { HttpStatusCode.OK to { description = "Logged out." } }
+                }) {
+                val token = getUsersSessionToken()
+
+                securityUserTokenMapping.remove(token)
+
+                call.sessions.clear<LoginTokenSession>()
+                call.respond(HttpStatusCode.OK)
+            }
         }
-        get("session", { summary = "Return session ID if logged in" }) {
-          // val token = getUserId().name
-          val token = getUsersSessionToken() ?: throw UnauthorizedException("Invalid session")
-
-          if (securityUserTokenMapping.contains(token))
-              call.respond(mapOf("token" to mapOf("accessToken" to token)))
-          else throw UnauthorizedException("Invalid (outdated?) session!")
-        }
-      }
-
-      post(
-          "logout",
-          {
-            summary = "Logout (delete session)"
-            response { HttpStatusCode.OK to { description = "Logged out." } }
-          }) {
-            val token = getUsersSessionToken()
-
-            securityUserTokenMapping.remove(token)
-
-            call.sessions.clear<LoginTokenSession>()
-            call.respond(HttpStatusCode.OK)
-          }
     }
-  }
 }
 
 fun PipelineContext<Unit, ApplicationCall>.getUserId() =
@@ -281,8 +333,8 @@ fun PipelineContext<Unit, ApplicationCall>.getUserUUID() =
 
 fun PipelineContext<Unit, ApplicationCall>.getWalletId() =
     runCatching {
-          UUID(call.parameters["wallet"] ?: throw IllegalArgumentException("No wallet ID provided"))
-        }
+        UUID(call.parameters["wallet"] ?: throw IllegalArgumentException("No wallet ID provided"))
+    }
         .getOrElse { throw IllegalArgumentException("Invalid wallet ID provided") }
 
 fun PipelineContext<Unit, ApplicationCall>.getWalletService(walletId: UUID) =
@@ -300,23 +352,23 @@ fun getNftService() = WalletServiceManager.getNftService()
 fun PipelineContext<Unit, ApplicationCall>.ensurePermissionsForWallet(
     required: AccountWalletPermissions
 ): Boolean {
-  val userId = getUserUUID()
-  val walletId = getWalletId()
+    val userId = getUserUUID()
+    val walletId = getWalletId()
 
-  val permissions = transaction {
-    (AccountWalletMappings.select {
-          (AccountWalletMappings.tenant eq "") and
-              (AccountWalletMappings.accountId eq userId) and
-              (AccountWalletMappings.wallet eq walletId)
+    val permissions = transaction {
+        (AccountWalletMappings.select {
+            (AccountWalletMappings.tenant eq "") and
+                    (AccountWalletMappings.accountId eq userId) and
+                    (AccountWalletMappings.wallet eq walletId)
         } // FIX ME -> TENANT HERE
-        .firstOrNull()
-        ?: throw ForbiddenException("This account does not have access to the specified wallet."))[
-        AccountWalletMappings.permissions]
-  }
+            .firstOrNull()
+            ?: throw ForbiddenException("This account does not have access to the specified wallet."))[
+            AccountWalletMappings.permissions]
+    }
 
-  if (permissions.power >= required.power) {
-    return true
-  } else {
-    throw InsufficientPermissionsException(minimumRequired = required, current = permissions)
-  }
+    if (permissions.power >= required.power) {
+        return true
+    } else {
+        throw InsufficientPermissionsException(minimumRequired = required, current = permissions)
+    }
 }

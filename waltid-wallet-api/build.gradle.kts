@@ -47,6 +47,7 @@ dependencies {
         exclude("com.sksamuel.hoplite", "hoplite-yaml")
         exclude("com.sksamuel.hoplite", "hoplite-hikaricp")
     }
+    implementation("io.ktor:ktor-client-apache-jvm:2.3.7")
 
     /* -- KTOR -- */
 
