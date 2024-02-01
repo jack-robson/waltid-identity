@@ -24,16 +24,11 @@ export default defineNuxtConfig({
     },
 
     auth: {
-        baseURL: "/wallet-api/auth",
-
+        isEnabled: true,
+        baseUrl: "http://localhost:3000/",
         provider: {
-            type: "local",
-
-            pages: {
-                login: "/login"
-            }
+            type: 'authjs'
         },
-
         globalAppMiddleware: {
             isEnabled: true
         }
