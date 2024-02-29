@@ -34,6 +34,7 @@ abstract class WalletService(val tenant: String, val accountId: UUID, val wallet
     abstract suspend fun rejectCredential(parameter: CredentialRequestParameter): Boolean
     abstract suspend fun attachCategory(credentialId: String, categories: List<String>): Boolean
     abstract suspend fun detachCategory(credentialId: String, categories: List<String>): Boolean
+    abstract suspend fun renameCategory(oldName: String, newName: String): Boolean
 
     abstract fun matchCredentialsByPresentationDefinition(presentationDefinition: PresentationDefinition): List<WalletCredential>
 
