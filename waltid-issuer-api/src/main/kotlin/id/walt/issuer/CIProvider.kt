@@ -58,9 +58,11 @@ open class CIProvider : OpenIDCredentialIssuer(
         "WalletHolderCredential" to listOf("VerifiableCredential", "WalletHolderCredential"),
         "UniversityDegree" to listOf("VerifiableCredential", "UniversityDegree"),
         "VerifiableId" to listOf("VerifiableCredential", "VerifiableAttestation", "VerifiableId"),
+        "UniversityDegreeCredential-sdjwt" to listOf("VerifiableCredential", "UniversityDegreeCredential"),
     ).map {
+        val format = if (it.first == "UniversityDegreeCredential-sdjwt") CredentialFormat.vc_sd_jwt else CredentialFormat.jwt_vc_json
         CredentialSupported(
-            format = CredentialFormat.jwt_vc_json,
+            format = format,
             id = it.first,
             cryptographicBindingMethodsSupported = setOf("did"),
             cryptographicSuitesSupported = setOf("EdDSA", "ES256", "ES256K", "RSA"),

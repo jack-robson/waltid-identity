@@ -17,7 +17,8 @@ enum class CredentialFormat(val value: String) {
     jwt_vp_json_ld("jwt_vp_json-ld"),
     ldp_vp("ldp_vp"),
     jwt_vc("jwt_vc"),
-    jwt_vp("jwt_vp");
+    jwt_vp("jwt_vp"),
+    vc_sd_jwt("vc+sd-jwt");
 
     companion object {
         fun fromValue(value: String): CredentialFormat? {
